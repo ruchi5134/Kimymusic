@@ -30,7 +30,7 @@ class Config:
         self.SUPPORT_CHAT = getenv("SUPPORT_CHAT", "https://t.me/+WAOT47P-70QwOTBl")
 
         self.API_URL = "https://teaminflex.xyz"
-        self.API_KEY = getenv("API_KEY", "")
+        self.API_KEY = getenv("API_KEY", "INFLEX20013628D")
 
         # Primary music API (lily). Uses /search/all to fetch a direct
         # stream URL (e.g. from JioSaavn) for a text query.
