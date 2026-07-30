@@ -15,7 +15,7 @@ class Config:
 
         self.LOGGER_ID = int(getenv("LOGGER_ID", 0))
         self.OWNER_ID = int(getenv("OWNER_ID", 0))
-        self.OWNER_USERNAME = getenv("OWNER_USERNAME", "Ankit_sharma_212")
+        self.OWNER_USERNAME = getenv("OWNER_USERNAME", "@lll_Ritik_lll")
         self.OWNER_LINK = f"https://t.me/{self.OWNER_USERNAME.lstrip('@')}"
 
         self.DURATION_LIMIT = int(getenv("DURATION_LIMIT", 14400)) * 14400
