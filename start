@@ -1,1 +1,1 @@
-python3 -m uv run --no-sync python3 -m VampireMusic
+uv run --no-sync python3 -m VampireMusic
