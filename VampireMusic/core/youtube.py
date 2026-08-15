@@ -1,8 +1,9 @@
-import asyncio
+#Kanha [ @xoknha ]
+
+
 import os
 import random
 import re
-from pathlib import Path
 
 import aiohttp
 from py_yt import Playlist, VideosSearch
@@ -10,9 +11,17 @@ from py_yt import Playlist, VideosSearch
 from VampireMusic import logger
 from VampireMusic.helpers import Track, utils
 
-# Inflex download API. Get a key from @InflexAPIBot on Telegram.
-API_URL = "https://teaminflex.xyz"
-API_KEY = "INFLEX20013628D"
+# Shruti download API — primary download backend.
+# Get a key from Telegram bot: @SHRUTIAPIBOT
+SHRUTI_API_URL = os.environ.get("SHRUTI_API_URL", "https://api.shrutibots.site")
+SHRUTI_API_KEY = os.environ.get("SHRUTI_API_KEY", "ShrutiBotsOKChMnKPT8mJA5xKDo1e")
+
+# Inflex download API — fallback backend, used only if Shruti fails.
+# Get a key from Telegram bot: @InflexAPIBot
+INFLEX_API_URL = os.environ.get("INFLEX_API_URL", "https://teaminflex.xyz")
+INFLEX_API_KEY = os.environ.get("INFLEX_API_KEY", "INFLEX20013628D")
+
+DOWNLOAD_DIR = "downloads"
 
 
 class YouTube:
@@ -20,7 +29,7 @@ class YouTube:
         self.base = "https://www.youtube.com/watch?v="
         self.cookies = []
         self.checked = False
-        self.cookie_dir = "VampireMusic/cookies"
+        self.cookie_dir = "Kanha/cookies"
         self.warned = False
         self.regex = re.compile(
             r"(https?://)?(www\.|m\.|music\.)?"
@@ -30,7 +39,7 @@ class YouTube:
         self.iregex = re.compile(
             r"https?://(?:www\.|m\.|music\.)?(?:youtube\.com|youtu\.be)"
             r"(?!/(watch\?v=[A-Za-z0-9_-]{11}|shorts/[A-Za-z0-9_-]{11}"
-            r"|playlist\?list=PL[A-Za-z0-9_-]+|[A-Za-z0-9_-]{11}))\S*"
+            r"|playlist\?list=[A-Za-z0-9_-]+|[A-Za-z0-9_-]{11}))\S*"
         )
 
     def get_cookies(self):
@@ -138,157 +147,135 @@ class YouTube:
             pass
         return tracks
 
-    async def _download_audio(self, video_id: str):
-        logger.info(f"🎵 [AUDIO] Starting download process for ID: {video_id}")
+    @staticmethod
+    def _extract_id(link: str) -> str:
+        """Accepts either a raw 11-char video ID or a full watch URL."""
+        return link.split("v=")[-1].split("&")[0] if "v=" in link else link
 
-        path = Path(f"downloads/{video_id}.webm")
-        os.makedirs("downloads", exist_ok=True)
-
-        if path.exists():
-            logger.info(f"🎵 [LOCAL] Found existing audio for ID {video_id}")
-            return str(path)
-
-        payload = {"url": video_id, "type": "audio"}
-        headers = {
-            "Content-Type": "application/json",
-            "X-API-KEY": API_KEY,
-        }
-
-        async with aiohttp.ClientSession() as session:
+    @staticmethod
+    def _cleanup(path: str) -> None:
+        if os.path.exists(path):
             try:
-                async with session.post(
-                    f"{API_URL}/download",
-                    json=payload,
-                    headers=headers,
-                ) as response:
-                    data = await response.json(content_type=None)
+                os.remove(path)
+            except Exception:
+                pass
 
-                if data and data.get("status") == "error":
-                    logger.error(f"[AUDIO] API ERROR → {data}")
-                    return None
-
-                retries = 10
-
-                if not data or not data.get("download_url"):
-                    logger.warning("[AUDIO] File not ready / JSON missing → retrying...")
-
-                    for i in range(retries):
-                        await asyncio.sleep(8)
-
-                        async with session.post(
-                            f"{API_URL}/download",
-                            json=payload,
-                            headers=headers,
-                        ) as response:
-                            data = await response.json(content_type=None)
-
-                        if data and data.get("status") == "error":
-                            logger.error(f"[AUDIO] API ERROR during retry → {data}")
-                            return None
-
-                        if data and data.get("status") == "success" and data.get("download_url"):
-                            logger.info(f"[AUDIO] Got URL after retry #{i+1}")
-                            break
-
-                        logger.warning(f"[AUDIO] Retry {i+1}/{retries} → still not ready")
-
-                if not data or not data.get("download_url"):
-                    logger.error(f"[AUDIO] FAILED after all retries → {data}")
-                    return None
-
-                download_link = API_URL + data["download_url"]
-
-                async with session.get(download_link) as file_response:
-                    if file_response.status != 200:
-                        logger.error(f"[AUDIO] Download failed → {file_response.status}")
-                        return None
-
+    async def _shruti_download(self, vid: str, media_type: str, path: str) -> bool:
+        """Primary backend. Returns True on a verified, non-empty file."""
+        tag = media_type.upper()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{SHRUTI_API_URL}/download",
+                    params={"url": vid, "type": media_type, "api_key": SHRUTI_API_KEY},
+                    timeout=aiohttp.ClientTimeout(total=300 if media_type == "audio" else 600),
+                ) as resp:
+                    if resp.status != 200:
+                        logger.error(f"[SHRUTI][{tag}] API returned HTTP {resp.status} for ID: {vid}")
+                        return False
                     with open(path, "wb") as f:
-                        async for chunk in file_response.content.iter_chunked(8192):
+                        async for chunk in resp.content.iter_chunked(131072):
                             f.write(chunk)
 
-                logger.info(f"🎵 [API] Audio download completed for {video_id}")
-                return str(path)
+            if os.path.exists(path) and os.path.getsize(path) > 0:
+                logger.info(f"[SHRUTI] {tag} download completed for {vid}")
+                return True
+            self._cleanup(path)
+            return False
 
-            except Exception as e:
-                logger.error(f"[AUDIO] Exception: {e}")
-                return None
+        except Exception as e:
+            logger.error(f"[SHRUTI][{tag}] Exception for ID {vid}: {e}")
+            self._cleanup(path)
+            return False
+
+    async def _inflex_download(self, vid: str, media_type: str, path: str) -> bool:
+        """Fallback backend, only tried if Shruti fails. Returns True on a verified, non-empty file."""
+        tag = media_type.upper()
+        try:
+            async with aiohttp.ClientSession() as session:
+                payload = {"url": vid, "type": media_type}
+                headers = {"Content-Type": "application/json", "X-API-KEY": INFLEX_API_KEY}
+
+                async with session.post(
+                    f"{INFLEX_API_URL}/download",
+                    json=payload,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=300 if media_type == "audio" else 600),
+                ) as resp:
+                    data = await resp.json(content_type=None)
+
+                    if resp.status != 200:
+                        logger.error(f"[INFLEX][{tag}] API returned HTTP {resp.status} → {data}")
+                        return False
+                    if data.get("status") == "error":
+                        logger.error(f"[INFLEX][{tag}] API Error: {data.get('detail', 'Unknown error')}")
+                        return False
+                    if data.get("status") != "success" or not data.get("download_url"):
+                        logger.error(f"[INFLEX][{tag}] Unexpected API response: {data}")
+                        return False
+
+                    download_link = f"{INFLEX_API_URL}{data['download_url']}"
+
+                async with session.get(download_link) as file_resp:
+                    if file_resp.status != 200:
+                        logger.error(f"[INFLEX][{tag}] Download failed ({file_resp.status}) for ID: {vid}")
+                        return False
+                    with open(path, "wb") as f:
+                        async for chunk in file_resp.content.iter_chunked(131072):
+                            f.write(chunk)
+
+            if os.path.exists(path) and os.path.getsize(path) > 0:
+                logger.info(f"[INFLEX] {tag} download completed for {vid}")
+                return True
+            self._cleanup(path)
+            return False
+
+        except Exception as e:
+            logger.error(f"[INFLEX][{tag}] Exception for ID {vid}: {e}")
+            self._cleanup(path)
+            return False
+
+    async def _download_audio(self, video_id: str):
+        vid = self._extract_id(video_id)
+        if not vid or len(vid) < 3:
+            return None
+
+        os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+        path = os.path.join(DOWNLOAD_DIR, f"{vid}.mp3")
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            logger.info(f"🎵 [LOCAL] Found existing audio for ID {vid}")
+            return path
+
+        if await self._shruti_download(vid, "audio", path):
+            return path
+
+        logger.warning(f"[AUDIO] Shruti failed for {vid}, trying Inflex fallback...")
+        if await self._inflex_download(vid, "audio", path):
+            return path
+
+        logger.error(f"[AUDIO] All backends failed for ID: {vid}")
+        return None
 
     async def _download_video(self, video_id: str):
-        logger.info(f"🎥 [VIDEO] Starting download process for ID: {video_id}")
+        vid = self._extract_id(video_id)
+        if not vid or len(vid) < 3:
+            return None
 
-        path = Path(f"downloads/{video_id}.mkv")
-        os.makedirs("downloads", exist_ok=True)
+        os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+        path = os.path.join(DOWNLOAD_DIR, f"{vid}.mp4")
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            logger.info(f"🎥 [LOCAL] Found existing video for ID {vid}")
+            return path
 
-        if path.exists():
-            logger.info(f"🎥 [LOCAL] Found existing video for ID {video_id}")
-            return str(path)
+        if await self._shruti_download(vid, "video", path):
+            return path
 
-        payload = {"url": video_id, "type": "video"}
-        headers = {
-            "Content-Type": "application/json",
-            "X-API-KEY": API_KEY,
-        }
+        logger.warning(f"[VIDEO] Shruti failed for {vid}, trying Inflex fallback...")
+        if await self._inflex_download(vid, "video", path):
+            return path
 
-        async with aiohttp.ClientSession() as session:
-            try:
-                async with session.post(
-                    f"{API_URL}/download",
-                    json=payload,
-                    headers=headers,
-                ) as response:
-                    data = await response.json(content_type=None)
-
-                if data and data.get("status") == "error":
-                    logger.error(f"[VIDEO] API ERROR → {data}")
-                    return None
-
-                retries = 20
-
-                if not data or not data.get("download_url"):
-                    logger.warning("[VIDEO] File not ready / JSON missing → retrying...")
-
-                    for i in range(retries):
-                        await asyncio.sleep(20)
-
-                        async with session.post(
-                            f"{API_URL}/download",
-                            json=payload,
-                            headers=headers,
-                        ) as response:
-                            data = await response.json(content_type=None)
-
-                        if data and data.get("status") == "error":
-                            logger.error(f"[VIDEO] API ERROR during retry → {data}")
-                            return None
-
-                        if data and data.get("status") == "success" and data.get("download_url"):
-                            logger.info(f"[VIDEO] Got URL after retry #{i+1}")
-                            break
-
-                        logger.warning(f"[VIDEO] Retry {i+1}/{retries} → still not ready")
-
-                if not data or not data.get("download_url"):
-                    logger.error(f"[VIDEO] FAILED after all retries → {data}")
-                    return None
-
-                download_link = API_URL + data["download_url"]
-
-                async with session.get(download_link) as file_response:
-                    if file_response.status != 200:
-                        logger.error(f"[VIDEO] Download failed → {file_response.status}")
-                        return None
-
-                    with open(path, "wb") as f:
-                        async for chunk in file_response.content.iter_chunked(8192):
-                            f.write(chunk)
-
-                logger.info(f"🎥 [API] Video download completed for {video_id}")
-                return str(path)
-
-            except Exception as e:
-                logger.error(f"[VIDEO] Exception: {e}")
-                return None
+        logger.error(f"[VIDEO] All backends failed for ID: {vid}")
+        return None
 
     async def download(self, video_id: str, video: bool = False):
         if video:
