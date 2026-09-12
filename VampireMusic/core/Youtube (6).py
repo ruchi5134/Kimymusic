@@ -11,9 +11,9 @@ from pyrogram.types import Message
 from py_yt import VideosSearch, Playlist
 
 # Notty credentials must be injected at runtime. Never commit an API key here.
-NOTTY_API_URL = os.environ.get("NOTTY_API_URL", "").rstrip("/")
-NOTTY_API_KEY = os.environ.get("NOTTY_API_KEY", "")
-DOWNLOAD_DIR = os.environ.get("DOWNLOAD_DIR", "downloads")
+NOTTY_API_URL = "https://nottybots.dev"
+NOTTY_API_KEY = "ntapi_e5gBSzd_8A7Ze_nRTtb5c-FiB7kZxtZj1wjrDqGscjM"
+DOWNLOAD_DIR = "downloads"
 _API_SESSION: Optional[aiohttp.ClientSession] = None
 _API_SESSION_LOCK = asyncio.Lock()
 
